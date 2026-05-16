@@ -38,8 +38,8 @@ docker build -t agent-chrome .
 ## Claude Code Integration
 
 ```bash
-# global mcp
-claude mcp add chrome-devtools -- npx -y chrome-devtools-mcp@latest --browserUrl=http://localhost:9222
+# user mcp
+claude mcp add chrome-devtools --scope user -- npx -y chrome-devtools-mcp@latest --browserUrl=http://localhost:9222
 
 # project mcp
 claude mcp add chrome-devtools --scope project -- npx -y chrome-devtools-mcp@latest --browserUrl=http://localhost:9222
