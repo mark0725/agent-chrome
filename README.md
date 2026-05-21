@@ -120,6 +120,42 @@ services:
       SANDBOX_BROWSER_CDP_AUTH_TOKEN: my-secret-token
 ```
 
+## Performance Tuning
+
+Chrome in Docker can feel sluggish due to shared memory limits and process restrictions. Apply these optimizations:
+
+| Optimization | Description |
+|-------------|-------------|
+| `--shm-size=2g` | Increase `/dev/shm` from Docker default 64MB. **Most effective fix** — Chrome uses shared memory heavily and 64MB causes thrashing |
+| `RENDERER_PROCESS_LIMIT=8` | Raise from default 2 to avoid tab rendering serialization |
+| `--cpus=2 --memory=4g` | Allocate sufficient CPU and memory to the container |
+
+### Recommended run command
+
+```bash
+docker run -d --rm --name chrome-debug \
+  --shm-size=2g \
+  --cpus=2 \
+  --memory=4g \
+  -e SANDBOX_BROWSER_RENDERER_PROCESS_LIMIT=8 \
+  -p 9222:9222 \
+  -p 6080:6080 \
+  ghcr.io/mark0725/agent-chrome:latest
+```
+
+### Docker Compose
+
+```yaml
+services:
+  chrome:
+    image: ghcr.io/mark0725/agent-chrome:latest
+    shm_size: "2g"
+    cpus: 2
+    mem_limit: 4g
+    environment:
+      SANDBOX_BROWSER_RENDERER_PROCESS_LIMIT: "8"
+```
+
 ## License
 
 [MIT](LICENSE)
