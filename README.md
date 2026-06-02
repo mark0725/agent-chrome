@@ -13,6 +13,9 @@ docker run -d --rm --network host --name chrome-debug agent-chrome
 
 ```bash
 docker run -d --rm --name chrome-debug \
+  --shm-size=4g \
+  --cpus=2 \
+  --memory=4g \
   -p 9222:9222 \
   -p 9223:9223 \
   -p 5900:5900 \
@@ -39,10 +42,10 @@ docker build -t agent-chrome .
 
 ```bash
 # user mcp
-claude mcp add chrome-devtools --scope user -- npx -y chrome-devtools-mcp@latest --browserUrl=http://localhost:9222
+claude mcp add chrome-devtools --scope user -- npx -y chrome-devtools-mcp@latest --browserUrl=http://localhost:9223
 
 # project mcp
-claude mcp add chrome-devtools --scope project -- npx -y chrome-devtools-mcp@latest --browserUrl=http://localhost:9222
+claude mcp add chrome-devtools --scope project -- npx -y chrome-devtools-mcp@latest --browserUrl=http://localhost:9223
 ```
 
 ## Ports
