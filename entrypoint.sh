@@ -67,7 +67,7 @@ cleanup() {
   local pids=()
   local pid
 
-  for pid in "${WEBSOCKIFY_PID:-}" "${X11VNC_PID:-}" "${CDP_RELAY_PID:-}" "${CHROME_PID:-}" "${XVFB_PID:-}"; do
+  for pid in "${WEBSOCKIFY_PID:-}" "${X11VNC_PID:-}" "${CDP_RELAY_PID:-}" "${CDP_FORWARDER_PID:-}" "${CHROME_PID:-}" "${XVFB_PID:-}"; do
     if [[ -n "${pid:-}" ]]; then
       pids+=("$pid")
     fi
@@ -112,14 +112,14 @@ Xvfb :1 -screen 0 "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}x24" -ac -nolisten tcp &
 XVFB_PID=$!
 echo "[sandbox] Xvfb started (PID: ${XVFB_PID})"
 
-if [[ "${CDP_PORT}" -ge 65535 ]]; then
-  CHROME_CDP_PORT="$((CDP_PORT - 1))"
+if [[ "${CDP_PORT}" -ge 65534 ]]; then
+  CHROME_CDP_PORT="$((CDP_PORT - 2))"
 else
-  CHROME_CDP_PORT="$((CDP_PORT + 1))"
+  CHROME_CDP_PORT="$((CDP_PORT + 2))"
 fi
+EXPOSED_CDP_PORT="$((CDP_PORT + 1))"
 
 CHROME_ARGS=(
-  "--remote-debugging-address=127.0.0.1"
   "--remote-debugging-port=${CHROME_CDP_PORT}"
   "--user-data-dir=${HOME}/.chrome"
   "--no-first-run"
@@ -193,7 +193,69 @@ if [[ "${CDP_READY}" == "0" ]]; then
   exit 1
 fi
 
-echo "[sandbox] CDP ready. Starting relay..."
+echo "[sandbox] CDP ready. Exposing ${EXPOSED_CDP_PORT} on 0.0.0.0..."
+
+SANDBOX_BROWSER_CDP_FORWARD_LISTEN="${EXPOSED_CDP_PORT}" SANDBOX_BROWSER_CDP_FORWARD_UPSTREAM="${CHROME_CDP_PORT}" python3 - <<'PY' &
+import os
+import select
+import socket
+import socketserver
+
+LISTEN_PORT = int(os.environ["SANDBOX_BROWSER_CDP_FORWARD_LISTEN"])
+UPSTREAM_HOST = "127.0.0.1"
+UPSTREAM_PORT = int(os.environ["SANDBOX_BROWSER_CDP_FORWARD_UPSTREAM"])
+
+
+def relay(left, right):
+    sockets = [left, right]
+    try:
+        while sockets:
+            readable, _, _ = select.select(sockets, [], [])
+            for src in readable:
+                dst = right if src is left else left
+                data = src.recv(65536)
+                if not data:
+                    return
+                dst.sendall(data)
+    finally:
+        for sock in (left, right):
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
+class Handler(socketserver.BaseRequestHandler):
+    def handle(self):
+        try:
+            upstream = socket.create_connection((UPSTREAM_HOST, UPSTREAM_PORT), timeout=5)
+        except OSError:
+            return
+        upstream.settimeout(None)
+        self.request.settimeout(None)
+        try:
+            relay(self.request, upstream)
+        except OSError:
+            pass
+
+
+class Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+with Server(("0.0.0.0", LISTEN_PORT), Handler) as server:
+    print(f"[sandbox] CDP forwarder listening on 0.0.0.0:{LISTEN_PORT}", flush=True)
+    server.serve_forever()
+PY
+CDP_FORWARDER_PID=$!
+echo "[sandbox] CDP forwarder started (PID: ${CDP_FORWARDER_PID})"
+
+echo "[sandbox] Starting relay..."
 
 if [[ -z "${CDP_AUTH_TOKEN}" ]]; then
   echo "[sandbox-browser] WARNING: CDP auth token unset; CDP relay will not start." >&2
@@ -352,8 +414,9 @@ echo ""
 echo "==========================================="
 echo "  Sandbox Ready"
 echo "==========================================="
-echo "  CDP endpoint : http://0.0.0.0:${CDP_PORT}"
-echo "  CDP target   : http://127.0.0.1:${CHROME_CDP_PORT}"
+echo "  CDP relay     : http://0.0.0.0:${CDP_PORT} (with auth token)"
+echo "  CDP exposed   : http://0.0.0.0:${EXPOSED_CDP_PORT} (no auth)"
+echo "  CDP target    : http://127.0.0.1:${CHROME_CDP_PORT}"
 if [[ "${ENABLE_NOVNC}" == "1" && "${HEADLESS}" != "1" ]]; then
   echo "  noVNC        : http://0.0.0.0:${NOVNC_PORT}/vnc.html"
   echo "  VNC port     : ${VNC_PORT}"
